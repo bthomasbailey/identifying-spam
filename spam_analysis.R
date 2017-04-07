@@ -44,6 +44,7 @@ splitMessage <- function(msg){
 sampleSplit <- lapply(sampleEmail, splitMessage)
 
 
+###Naive Bayesian analysis
 
 ###Removing attachments from the message body
 header <- sampleSplit[[1]]$header
@@ -359,3 +360,48 @@ typeIErrorRate <- function(tau, llrVals, spam) {
 
 typeIErrorRate(0, testLLR, testIsSpam)
 typeIErrorRate(-20, testLLR, testIsSpam)
+
+typeIErrorRates <- function(llrVals, isSpam){
+  o <- order(llrVals)
+  llrVals <- llrVals[o]
+  isSpam <- isSpam[o]
+  
+  idx <- which(!isSpam)
+  N <- length(idx)
+  list(error = (N:1)/N, values = llrVals[idx])
+}
+
+
+###Classification Tree Approach
+#3.8.1: Processing the Header
+header <- sampleSplit[[1]]$header
+header[1] <- sub("^From", "Top-From:", header[1])
+
+headerPieces <- read.dcf(textConnection(header), all = T)
+headerVec <- unlist(headerPieces)
+dupKeys <- sapply(headerPieces, function(x) length(unlist(x)))
+names(headerVec) <- rep(colnames(headerPieces), dupKeys)
+
+processHeader <- function(header){
+  
+  #modify first line to create a key:value pair
+  header[1] <- sub("^From", "Top-From:", header[1])
+  
+  headerMat <- read.dcf(textConnection(header), all = T)
+  headerVec <- unlist(headerMat)
+  
+  dupKeys <- sapply(headerMat, function(x) length(unlist(x)))
+  names(headerVec) <- rep(colnames(headerMat), dupKeys)
+  
+  return(headerVec)      
+}
+
+headerList <- lapply(sampleSplit, function(msg) processHeader(msg$header))
+
+contentTypes <- sapply(headerList, function(header) header["Content-Type"])
+names(contentTypes) <- NULL
+
+#3.8.2: Processing Attachments
+hasAttach <- grep("^ *multi", tolower(contentTypes))
+boundaries <- getBoundary(contentTypes[hasAttach])
+
