@@ -199,7 +199,8 @@ words <- words[!(words %in% stopWords)]
 
 ###Exercise Q.5: write the function findMsgWords()
 findMsgWords <- function(msg, stopWords){
-  cleanMsg <- tolower(gsub("[[:punct:]0-9[:blank:]]+", " ", msg))
+  #cleanMsg <- tolower(gsub("[[:punct:]0-9[:blank:]]+", " ", msg))
+  cleanMsg <- tolower(gsub("[^[:alpha:]]+", " ", msg))
   words <- unlist(strsplit(cleanMsg, "[[:blank:]]+"))
   words <- words[nchar(words) > 1]
   unique(words[!(words %in% stopWords)])
@@ -387,11 +388,14 @@ processHeader <- function(header){
   #modify first line to create a key:value pair
   header[1] <- sub("^From", "Top-From:", header[1])
   
-  headerMat <- read.dcf(textConnection(header), all = T)
+  conn <- textConnection(header)
+  headerMat <- read.dcf(conn, all = T)
   headerVec <- unlist(headerMat)
   
   dupKeys <- sapply(headerMat, function(x) length(unlist(x)))
   names(headerVec) <- rep(colnames(headerMat), dupKeys)
+  
+  close(conn)
   
   return(headerVec)      
 }
@@ -404,4 +408,346 @@ names(contentTypes) <- NULL
 #3.8.2: Processing Attachments
 hasAttach <- grep("^ *multi", tolower(contentTypes))
 boundaries <- getBoundary(contentTypes[hasAttach])
+
+boundary <- boundaries[9]
+body <- sampleSplit[[15]]$body
+
+bString <- paste0("--", boundary)
+bStringLocs <- which(bString == body)
+
+eString <- paste0("--", boundary, "--")
+eStringLoc <- which(eString == body)
+
+
+processAttach <- function(body, contentType){
+  
+  #use contentType to get boundary string
+  boundary <- getBoundary(contentType)
+  
+  bString <- paste0("--", boundary)
+  bStringLocs <- which(bString == body)
+  
+  eString <- paste0("--", boundary, "--")
+  eStringLoc <- which(eString == body)
+  if (length(eStringLoc) == 0) {eStringLoc <- length(body)}
+  
+  #account for emails that have a boundary string saying they have attachments, but actually don't
+  if (length(bStringLocs) > 1) {
+    attStartLocs <- bStringLocs[-1] + 1
+    attEndLocs <- c(bStringLocs[-1], eStringLoc)[-1] - 1
+    
+    attLens <- attEndLocs - attStartLocs + 1
+    # attLines <- unlist(mapply(function(x, y) x:(x + y - 1), attStartLocs, attLens))
+    # attsBodyArea <- body[attLines]
+    # attContTypeLines <- attsBodyArea[grep("content-type:", tolower(attsBodyArea))]
+    
+    attContTypeLines <- body[attStartLocs]
+    contTypeVals <- sapply(strsplit(attContTypeLines, ":"), 
+                           function(x) trimws(strsplit(x[2], ";")[[1]][1]))
+    
+    attDF <- data.frame("aLen" = attLens, "aType" = contTypeVals, stringsAsFactors = F)
+  
+  } else{
+    
+    attDF <- data.frame("aLen" = NA, "aType" = NA)
+  
+  }
+  
+  list(body = dropAttach(body, boundary), attachDF = attDF)
+  
+}
+
+#3.8.3: Testing Our Code on More email Data
+bodyList <- lapply(sampleSplit, function(msg) msg$body)
+attList <- mapply(processAttach, bodyList[hasAttach], contentTypes[hasAttach], SIMPLIFY = F)
+
+lens <- lapply(attList, function(processedA) processedA$attachDF$aLen)
+
+
+#3.8.4: Completing the Process
+
+readEmail <- function(dirName){
+  #retrieve the name of file in directory
+  fileNames <- list.files(dirName, full.names = T)
+  
+  #drop files that are not email, i.e., cmds
+  notEmail <- grep("cmds$", fileNames)
+  if (length(notEmail) > 0) fileNames <- fileNames[-notEmail]
+  
+  sapply(fileNames, readLines, encoding = "latin1", USE.NAMES = T)  
+}
+
+processAllEmail <- function(dirName, isSpam = F){
+  #read all files in the directory
+  messages <- readEmail(dirName)
+  fileNames <- names(messages)
+  n <- length(messages)
+  
+  #split header from body
+  eSplit <- lapply(messages, splitMessage)
+  rm(messages)
+
+  #process header as named character vector
+  headerList <- lapply(eSplit, function(msg) processHeader(msg$header))
+  
+  #extract content-type key
+  contentTypes <- sapply(headerList, function(header) header["Content-Type"])
+
+  #extract the body
+  bodyList <- lapply(eSplit, function(msg) msg$body)
+  rm(eSplit)
+  
+  #which emails have attachments
+  hasAttach <- grep("^ *multi", tolower(contentTypes))
+  
+  #get summary stats for attachments and the shorter body
+  attList <- mapply(processAttach, bodyList[hasAttach], contentTypes[hasAttach], SIMPLIFY = F)
+  
+  bodyList[hasAttach] <- lapply(attList, function(attEl) attEl$body)
+
+  attachInfo <- vector("list", length = n)
+  attachInfo[hasAttach] <- lapply(attList, function(attEl) attEl$attachDF)
+  
+  #prepare return structure
+  emailList <- mapply(function(header, body, attach, isSpam) {
+                        list(isSpam = isSpam, header = header, body = body, attach = attach)
+                      },
+                      headerList, bodyList, attachInfo, rep(isSpam, n), SIMPLIFY = F)
+
+  names(emailList) <- fileNames
+  
+  invisible(emailList)  
+  
+}
+
+
+emailStruct <- mapply(processAllEmail, fullDirNames, isSpam = rep(c(F, T), 3:2))
+emailStruct <- unlist(emailStruct, recursive = F)
+
+sampleStruct <- emailStruct[indx]
+
+
+#3.9: Deriving Variables from the email Message
+header <- sampleStruct[[1]]$header
+subject <- header["Subject"]
+
+els <- strsplit(subject, "")$Subject
+all(els %in% LETTERS)
+
+testSubject <- c("DEAR MADAME", "WINNER!", "")
+
+els <- strsplit(testSubject, "")
+sapply(els, function(subject) all(subject %in% LETTERS))
+
+gsub("[^[:alpha:]]", "", testSubject)
+
+
+isYelling <- function(msg){
+  if ("Subject" %in% names(msg$header)){
+    el <- gsub("[^[:alpha:]]", "", msg$header["Subject"])  
+    if (nchar(el) > 0){
+      gsub("[A-Z]", "", el) < 1  
+    } else {
+      FALSE
+    }
+  } else {
+    NA
+  }
+}
+
+perCaps <- function(msg){
+  body <- paste(msg$body, collapse = "")
+  
+  #Return NA if the body of the message is "empty"
+  if (length(body) == 0 || nchar(body) == 0) {return(NA)}
+  
+  #Eliminate non-alpha characters
+  body <- gsub("[^[:alpha:]]", "", body)
+  capText <- gsub("[^A-Z]", "", body)
+  100*nchar(capText)/nchar(body)
+}
+
+sapply(sampleStruct, perCaps)
+
+
+funcList <- list(
+  
+  isRe = function(msg) {
+    "Subject" %in% names(msg$header) && length(grep("^[ ]*Re:", msg$header[["Subject"]])) > 0
+  },
+  
+  numLines = function(msg) length(msg$body),
+  
+  isYelling = function(msg){
+    if ("Subject" %in% names(msg$header)){
+      el <- gsub("[^[:alpha:]]", "", msg$header["Subject"])  
+      if (nchar(el) > 0){
+        gsub("[A-Z]", "", el) < 1  
+      } else {
+        FALSE
+      }
+    } else {
+      NA
+    }
+  },
+  
+  perCaps = function(msg){
+    body <- paste(msg$body, collapse = "")
+    
+    #Return NA if the body of the message is "empty"
+    if (length(body) == 0 || nchar(body) == 0) {return(NA)}
+    
+    #Eliminate non-alpha characters
+    body <- gsub("[^[:alpha:]]", "", body)
+    capText <- gsub("[^A-Z]", "", body)
+    100*nchar(capText)/nchar(body)
+  }
+  
+)
+
+
+lapply(funcList, function(func) sapply(sampleStruct, function(msg) func(msg)))
+
+createDerivedDF <- function(email = emailStruct, operations = funcList, verbose = F){
+  els <- lapply(names(operations), function(id) {
+    if(verbose){print(id)}
+    e <- operations[[id]]
+    v <- if(is.function(e)) {
+      sapply(email, e)
+    } else {
+      sapply(email, function(msg) eval(e))
+    }
+    v
+  })
+  
+  df <- as.data.frame(els)
+  names(df) <- names(operations)
+  invisible(df)
+}
+
+sampleDF <- createDerivedDF(sampleStruct)
+
+
+###Exercise Q.15: write more functions to add to funcList
+
+#Number of characters in the body of the msg
+bodyCharCt <- function(msg){
+  body <- paste(msg$body, collapse = "")
+  
+  #Return NA if the body of the message is "empty"
+  if (length(body) == 0 || nchar(body) == 0) {
+    NA    
+  } else {
+    nchar(body)
+  }
+}
+
+#TRUE if email address in the From field of the header contains an underscore
+underscore <- function(msg){
+  fromEmail <- strsplit(msg$header[["Top-From"]], " ")[[1]][1]
+  regexpr("_", fromEmail) != -1
+}
+
+#Number of exclamation marks in the subject
+subExcCt <- function(msg){
+  if("Subject" %in% names(msg$header)){
+    exPtLoc <- gregexpr("!", msg$header[["Subject"]])[[1]]
+    ifelse(exPtLoc == -1, 0, length(exPtLoc))
+  } else {
+    0
+  }
+}
+
+#Number of question marks in the subect
+subQuesCt <- function(msg){
+  if("Subject" %in% names(msg$header)){
+    quesLoc <- gregexpr("\\?", msg$header[["Subject"]])[[1]]
+    ifelse(quesLoc == -1, 0, length(quesLoc))
+  } else {
+    0
+  }  
+}
+
+#TRUE if a Priority key is present in the header
+priority <- function(msg){
+  "Priority" %in% names(msg$header)
+}
+
+#Number of recipients of the message, including CCs
+numRec <- function(msg){
+  if(!("To" %in% names(msg$header))){
+    NA
+  } else{
+    length(strsplit(msg$header[["To"]], ",")[[1]]) + 
+      ifelse("CC" %in% names(msg$header), length(strsplit(msg$header[["CC"]], ",")[[1]]), 0)
+  }
+}
+
+#TRUE if the In-Reply-To key is present in the header
+isInReplyTo <- function(msg){
+  "In-Reply-To" %in% names(msg$header)
+}
+
+# #TRUE if the recipients' email addresses are sorted
+# sortedRec <- function(msg){
+#   if(!("To" %in% names(msg$header))){
+#     FALSE 
+#   } else{
+#     recs <- gsub("[^[:alpha:]]+", "", strsplit(msg$header[["To"]], ",")[[1]])
+#     
+#     if(length(recs) == 1){
+#       FALSE
+#     }else if(!("CC" %in% names(msg$header))){
+#       all(sort(recs) == recs)
+#     } else{
+#       ccRecs <- gsub("[^[:alpha:]]+", "", strsplit(msg$header[["CC"]], ",")[[1]])
+#       all(sort(recs) == recs) && all(sort(ccRecs) == ccRecs)
+#     }
+#   }
+# }
+
+
+#TRUE if words in the subject have punctuation or numbers embedded in them, e.g., w!se
+subPunc <- function(msg){
+  subjWords <- strsplit(msg$header[["Subject"]], " ")[[1]]
+  subjWords <- gsub("^.(.*).", "\\1", subjWords)
+  hasPunc <- gregexpr("[^[:alpha:]]", subjWords)
+  any(hasPunc!=-1)
+}
+
+#Hour of the day in the Date field
+hour <- function(msg){
+  if("Date" %in% names(msg$header)){
+    as.numeric(gsub(".*\\s([0-9]{2}):.*", "\\1", msg$header[["Date"]]))
+  } else{
+    NA
+  }
+}
+
+#TRUE if the MIME type is multipart/text
+multipartText <- function(msg){
+  if("Content-Type" %in% names(msg$header)){
+    length(grep("multipart/text", tolower(msg$header[["Content-Type"]]))) > 0
+  } else{
+    NA
+  }
+}
+
+#TRUE if the message contains a PGP signature
+isPGPsigned <- function(msg){
+  if("Content-Type" %in% names(msg$header)){
+    length(grep("pgp-signature", tolower(msg$header[["Content-Type"]]))) > 0
+  } else{
+    NA
+  }
+}
+
+#Percentage of blanks in the subject
+subBlanks <- function(msg){
+  if("Subject" %in% names(msg$header)){
+    length(gregexpr(" ", msg$header[["Subject"]])[[1]])/nchar(msg$header[["Subject"]])
+  } else{
+    NA
+  }
+}
 
