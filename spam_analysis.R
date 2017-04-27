@@ -601,6 +601,152 @@ funcList <- list(
     body <- gsub("[^[:alpha:]]", "", body)
     capText <- gsub("[^A-Z]", "", body)
     100*nchar(capText)/nchar(body)
+  },
+  
+  
+  #Number of characters in the body of the msg
+  bodyCharCt = function(msg){
+    body <- paste(msg$body, collapse = "")
+    
+    #Return NA if the body of the message is "empty"
+    if (length(body) == 0 || nchar(body) == 0) {
+      NA    
+    } else {
+      nchar(body)
+    }
+  },
+  
+  #TRUE if email address in the From field of the header contains an underscore
+  underscore = function(msg){
+    fromEmail <- strsplit(msg$header[["Top-From"]], " ")[[1]][1]
+    regexpr("_", fromEmail) != -1
+  },
+  
+  #Number of exclamation marks in the subject
+  subExcCt = function(msg){
+    if("Subject" %in% names(msg$header)){
+      exPtLoc <- gregexpr("!", msg$header[["Subject"]])[[1]]
+      ifelse(exPtLoc == -1, 0, length(exPtLoc))
+    } else {
+      0
+    }
+  },
+  
+  #Number of question marks in the subect
+  subQuesCt = function(msg){
+    if("Subject" %in% names(msg$header)){
+      quesLoc <- gregexpr("\\?", msg$header[["Subject"]])[[1]]
+      ifelse(quesLoc == -1, 0, length(quesLoc))
+    } else {
+      0
+    }  
+  },
+  
+  #TRUE if a Priority key is present in the header
+  priority = function(msg){
+    "Priority" %in% names(msg$header)
+  },
+  
+  #Number of recipients of the message, including CCs
+  numRec = function(msg){
+    if(!("To" %in% names(msg$header))){
+      NA
+    } else{
+      length(strsplit(msg$header[["To"]], ",")[[1]]) + 
+        ifelse("CC" %in% names(msg$header), length(strsplit(msg$header[["CC"]], ",")[[1]]), 0)
+    }
+  },
+  
+  #TRUE if the In-Reply-To key is present in the header
+  isInReplyTo = function(msg){
+    "In-Reply-To" %in% names(msg$header)
+  },
+  
+  #TRUE if words in the subject have punctuation or numbers embedded in them, e.g., w!se
+  subPunc = function(msg){
+    subjWords <- strsplit(msg$header[["Subject"]], " ")[[1]]
+    subjWords <- gsub("^.(.*).", "\\1", subjWords)
+    hasPunc <- gregexpr("[^[:alpha:]]", subjWords)
+    any(hasPunc!=-1)
+  },
+  
+  #Hour of the day in the Date field
+  hour = function(msg){
+    if("Date" %in% names(msg$header)){
+      as.numeric(gsub(".*\\s([0-9]{2}):.*", "\\1", msg$header[["Date"]]))
+    } else{
+      NA
+    }
+  },
+  
+  #TRUE if the MIME type is multipart/text
+  multipartText = function(msg){
+    if("Content-Type" %in% names(msg$header)){
+      length(grep("multipart/text", tolower(msg$header[["Content-Type"]]))) > 0
+    } else{
+      NA
+    }
+  },
+  
+  #TRUE if the message contains a PGP signature
+  isPGPsigned = function(msg){
+    if("Content-Type" %in% names(msg$header)){
+      length(grep("pgp-signature", tolower(msg$header[["Content-Type"]]))) > 0
+    } else{
+      NA
+    }
+  },
+  
+  #Percentage of blanks in the subject
+  subBlanks = function(msg){
+    if("Subject" %in% names(msg$header)){
+      length(gregexpr(" ", msg$header[["Subject"]])[[1]])/nchar(msg$header[["Subject"]])
+    } else{
+      NA
+    }
+  },
+  
+  #TRUE if there is no hostname in the Message-Id key in the header
+  noHost = function(msg){
+    if("Message-Id" %in% names(msg$header)){
+      #make sure to strip off surrounding <  >
+      gsub("<(.*)>", "\\1", msg$header[["Message-Id"]]) == "" 
+    } else {
+      NA
+    }
+  },
+  
+  #TRUE if the email sender's address (before the @) ends in a number
+  numEnd = function(msg){
+    lastChr <- gsub("(.*)(.)@.*", "\\2", msg$header[["From"]])
+    suppressWarnings(!is.na(as.numeric(lastChr))) 
+  },
+  
+  #TRUE if the message body contains the phrase "original message"
+  isOrigMsg = function(msg){
+    length(grep("original message", tolower(msg$body))) > 0  
+  },
+  
+  #TRUE if the message body contains the word "dear"
+  isDear = function(msg){
+    length(grep("dear", tolower(msg$body))) > 0  
+  },
+  
+  #TRUE if the message body contains the phrase "wrote:"
+  isWrote = function(msg){
+    length(grep("wrote:", tolower(msg$body))) > 0  
+  },
+  
+  #Number of dollar signs in the message body
+  numDlr = function(msg){
+    dlrLocs <- unlist(sapply(msg$body, gregexpr, pattern = "\\$"))
+    sum(dlrLocs != -1)
+  },
+  
+  #The average length of words in a message
+  avgWordLen = function(msg){
+    words <- unlist(sapply(msg$body, strsplit, split = " ", USE.NAMES = F))
+    sum(nchar(words))/length(words)
   }
   
 )
@@ -629,64 +775,8 @@ sampleDF <- createDerivedDF(sampleStruct)
 
 
 ###Exercise Q.15: write more functions to add to funcList
+#see additions to funcList above
 
-#Number of characters in the body of the msg
-bodyCharCt <- function(msg){
-  body <- paste(msg$body, collapse = "")
-  
-  #Return NA if the body of the message is "empty"
-  if (length(body) == 0 || nchar(body) == 0) {
-    NA    
-  } else {
-    nchar(body)
-  }
-}
-
-#TRUE if email address in the From field of the header contains an underscore
-underscore <- function(msg){
-  fromEmail <- strsplit(msg$header[["Top-From"]], " ")[[1]][1]
-  regexpr("_", fromEmail) != -1
-}
-
-#Number of exclamation marks in the subject
-subExcCt <- function(msg){
-  if("Subject" %in% names(msg$header)){
-    exPtLoc <- gregexpr("!", msg$header[["Subject"]])[[1]]
-    ifelse(exPtLoc == -1, 0, length(exPtLoc))
-  } else {
-    0
-  }
-}
-
-#Number of question marks in the subect
-subQuesCt <- function(msg){
-  if("Subject" %in% names(msg$header)){
-    quesLoc <- gregexpr("\\?", msg$header[["Subject"]])[[1]]
-    ifelse(quesLoc == -1, 0, length(quesLoc))
-  } else {
-    0
-  }  
-}
-
-#TRUE if a Priority key is present in the header
-priority <- function(msg){
-  "Priority" %in% names(msg$header)
-}
-
-#Number of recipients of the message, including CCs
-numRec <- function(msg){
-  if(!("To" %in% names(msg$header))){
-    NA
-  } else{
-    length(strsplit(msg$header[["To"]], ",")[[1]]) + 
-      ifelse("CC" %in% names(msg$header), length(strsplit(msg$header[["CC"]], ",")[[1]]), 0)
-  }
-}
-
-#TRUE if the In-Reply-To key is present in the header
-isInReplyTo <- function(msg){
-  "In-Reply-To" %in% names(msg$header)
-}
 
 # #TRUE if the recipients' email addresses are sorted
 # sortedRec <- function(msg){
@@ -705,49 +795,4 @@ isInReplyTo <- function(msg){
 #     }
 #   }
 # }
-
-
-#TRUE if words in the subject have punctuation or numbers embedded in them, e.g., w!se
-subPunc <- function(msg){
-  subjWords <- strsplit(msg$header[["Subject"]], " ")[[1]]
-  subjWords <- gsub("^.(.*).", "\\1", subjWords)
-  hasPunc <- gregexpr("[^[:alpha:]]", subjWords)
-  any(hasPunc!=-1)
-}
-
-#Hour of the day in the Date field
-hour <- function(msg){
-  if("Date" %in% names(msg$header)){
-    as.numeric(gsub(".*\\s([0-9]{2}):.*", "\\1", msg$header[["Date"]]))
-  } else{
-    NA
-  }
-}
-
-#TRUE if the MIME type is multipart/text
-multipartText <- function(msg){
-  if("Content-Type" %in% names(msg$header)){
-    length(grep("multipart/text", tolower(msg$header[["Content-Type"]]))) > 0
-  } else{
-    NA
-  }
-}
-
-#TRUE if the message contains a PGP signature
-isPGPsigned <- function(msg){
-  if("Content-Type" %in% names(msg$header)){
-    length(grep("pgp-signature", tolower(msg$header[["Content-Type"]]))) > 0
-  } else{
-    NA
-  }
-}
-
-#Percentage of blanks in the subject
-subBlanks <- function(msg){
-  if("Subject" %in% names(msg$header)){
-    length(gregexpr(" ", msg$header[["Subject"]])[[1]])/nchar(msg$header[["Subject"]])
-  } else{
-    NA
-  }
-}
 
